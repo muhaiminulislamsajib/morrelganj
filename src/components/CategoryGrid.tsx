@@ -1,22 +1,22 @@
 import { useContext } from "react";
 import { Link } from "react-router-dom";
 import { Grid } from "lucide-react";
-import { cn } from "@/src/lib/utils";
-
-// Assuming context is passed or imported. For now using global mock
-const MOCK_CATEGORIES = [
-  { id: '1', name: { en: 'Hospitals', bn: 'হাসপাতাল' }, icon: 'hospital', slug: 'hospitals' },
-  { id: '2', name: { en: 'Education', bn: 'শিক্ষা' }, icon: 'graduation-cap', slug: 'education' },
-  { id: '3', name: { en: 'Transport', bn: 'পরিবহন' }, icon: 'bus', slug: 'transport' },
-  { id: '4', name: { en: 'Emergency', bn: 'জরুরি' }, icon: 'shield-alert', slug: 'emergency' },
-  { id: '5', name: { en: 'Dining', bn: 'খাবার' }, icon: 'utensils', slug: 'dining' },
-  { id: '6', name: { en: 'Shopping', bn: 'কেনাকাটা' }, icon: 'shopping-bag', slug: 'shopping' },
-];
+import { useFirebase } from "../contexts/FirebaseContext";
 
 export function CategoryGrid({ lang }: { lang: 'en' | 'bn' }) {
+  const { categories } = useFirebase();
+
+  if (categories.length === 0) {
+    return (
+      <div className="col-span-full py-12 text-center bg-slate-50 dark:bg-zinc-900 rounded-[2.5rem] border border-dashed border-slate-200 dark:border-zinc-800">
+        <p className="text-slate-400 font-bold text-sm uppercase tracking-widest">No Categories Published</p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
-      {MOCK_CATEGORIES.map((cat) => (
+      {categories.map((cat) => (
         <Link 
           key={cat.id}
           to={`/category/${cat.slug}`}

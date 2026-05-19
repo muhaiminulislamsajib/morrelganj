@@ -3,13 +3,28 @@ import { useNavigate, Link } from 'react-router-dom';
 import { 
   ArrowLeft, Upload, CheckCircle, 
   Building2, MessageSquare, Phone, MapPin, 
-  Tags, Info, Clock, Check
+  Tags, Info, Clock, Check, Hospital, GraduationCap,
+  Bus, ShieldAlert, Utensils, ShoppingBag, Users, Banknote,
+  Store, Wrench
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { UNIONS } from '../constants';
 import { cn } from '../lib/utils';
+
+const iconMap: Record<string, any> = {
+  'hospital': Hospital,
+  'graduation-cap': GraduationCap,
+  'bus': Bus,
+  'shield-alert': ShieldAlert,
+  'utensils': Utensils,
+  'shopping-bag': ShoppingBag,
+  'users': Users,
+  'bank': Banknote,
+  'store': Store,
+  'wrench': Wrench
+};
 
 export function ListingSubmission() {
   const { categories } = useFirebase();
@@ -102,23 +117,32 @@ export function ListingSubmission() {
               </div>
               <h2 className="text-2xl font-black">1. Choose Category</h2>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setFormData({...formData, categoryId: cat.id})}
-                  className={cn(
-                    "flex flex-col items-center gap-3 p-6 rounded-3xl border transition-all",
-                    formData.categoryId === cat.id 
-                      ? "bg-emerald-700 border-emerald-700 text-white shadow-xl shadow-emerald-900/20" 
-                      : "bg-slate-50 border-slate-100 text-slate-600 hover:border-emerald-200"
-                  )}
-                >
-                  <Tags className={cn("w-8 h-8", formData.categoryId === cat.id ? "text-white" : "text-slate-400")} />
-                  <span className="font-bold text-xs uppercase tracking-widest">{cat.name.en}</span>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {categories.length > 0 ? categories.map((cat) => {
+                const Icon = iconMap[cat.icon] || Tags;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setFormData({...formData, categoryId: cat.id})}
+                    className={cn(
+                      "flex flex-col items-center justify-center text-center gap-3 p-6 rounded-3xl border transition-all aspect-square",
+                      formData.categoryId === cat.id 
+                        ? "bg-emerald-700 border-emerald-700 text-white shadow-xl shadow-emerald-900/20" 
+                        : "bg-slate-50 border-slate-100 text-slate-600 hover:border-emerald-200"
+                    )}
+                  >
+                    <Icon className={cn("w-10 h-10", formData.categoryId === cat.id ? "text-white" : "text-slate-400")} />
+                    <span className="font-black text-[10px] uppercase tracking-widest leading-tight">{cat.name.en}</span>
+                  </button>
+                );
+              }) : (
+                <div className="col-span-full py-16 text-center bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                  <Tags className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                  <p className="text-slate-400 font-black text-sm uppercase tracking-widest">Initialization Required</p>
+                  <p className="text-xs text-slate-400 mt-2 font-medium">Please wait for the administrator to set up categories.</p>
+                </div>
+              )}
             </div>
           </div>
 

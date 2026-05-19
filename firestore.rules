@@ -20,14 +20,17 @@ service cloud.firestore {
 
     // --- Entity Validations ---
     function isValidCategory(data) {
-      return data.keys().hasAll(['name_en', 'name_bn', 'icon', 'slug']) &&
-             data.name_en is string && data.name_en.size() > 0 && data.name_en.size() <= 200 &&
+      return data.keys().hasAll(['name', 'icon', 'slug']) &&
+             data.name is map &&
+             data.name.en is string && data.name.en.size() > 0 &&
              data.slug.size() <= 100;
     }
 
     function isValidListing(data) {
-      return data.keys().hasAll(['categoryId', 'title_en', 'title_bn', 'status']) &&
+      return data.keys().hasAll(['categoryId', 'title', 'status']) &&
              data.categoryId is string &&
+             data.title is map &&
+             data.title.en is string &&
              data.status in ['published', 'pending', 'hidden'];
     }
 

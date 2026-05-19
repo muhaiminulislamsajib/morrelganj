@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, createContext, useContext, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
+import React, { useState, createContext, useContext, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link, useLocation, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Menu, X, Home, Grid, Bell, User, 
@@ -12,9 +12,35 @@ import {
   ChevronRight, ArrowLeft, Globe, Moon, Sun,
   PlusCircle, LayoutDashboard, Heart, Settings,
   ShieldAlert, Flame, Truck, HeartPulse, List, LayoutGrid,
-  Lock
+  Lock, Trash2, Edit, CheckCircle2, ShieldX, Clock,
+  Hospital, GraduationCap, Bus, Utensils, ShoppingBag, Users, Banknote, Store, Wrench, Star
 } from 'lucide-react';
 import { cn } from './lib/utils';
+import { 
+  collection, addDoc, getDocs, serverTimestamp, 
+  updateDoc, deleteDoc, doc, query, where, orderBy,
+  onSnapshot
+} from 'firebase/firestore';
+import { db, signInWithGoogle } from './lib/firebase';
+import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
+import { CategoryGrid } from './components/CategoryGrid';
+import { CategoryHeader } from './components/CategoryView';
+import { ListingDetail } from './components/ListingDetail';
+import { ListingSubmission } from './components/ListingSubmission';
+
+const iconMap: Record<string, any> = {
+  'hospital': Hospital,
+  'graduation-cap': GraduationCap,
+  'bus': Bus,
+  'shield-alert': ShieldAlert,
+  'utensils': Utensils,
+  'shopping-bag': ShoppingBag,
+  'users': Users,
+  'bank': Banknote,
+  'store': Store,
+  'wrench': Wrench,
+  'grid': Grid
+};
 
 // --- Context & State ---
 type Language = 'en' | 'bn';
@@ -62,39 +88,6 @@ const translations = {
     'common.featured': 'ফিচারড'
   }
 };
-
-// --- Mock Data ---
-const MOCK_CATEGORIES = [
-  { id: '1', name: { en: 'Hospitals', bn: 'হাসপাতাল' }, icon: 'hospital', slug: 'hospitals' },
-  { id: '2', name: { en: 'Education', bn: 'শিক্ষা' }, icon: 'graduation-cap', slug: 'education' },
-  { id: '3', name: { en: 'Transport', bn: 'পরিবহন' }, icon: 'bus', slug: 'transport' },
-  { id: '4', name: { en: 'Emergency', bn: 'জরুরি' }, icon: 'shield-alert', slug: 'emergency' },
-  { id: '5', name: { en: 'Dining', bn: 'খাবার' }, icon: 'utensils', slug: 'dining' },
-  { id: '6', name: { en: 'Shopping', bn: 'কেনাকাটা' }, icon: 'shopping-bag', slug: 'shopping' },
-];
-
-const MOCK_LISTINGS = [
-  {
-    id: '1',
-    title: { en: 'Morrelganj Upazila Health Complex', bn: 'মোড়েলগঞ্জ উপজেলা স্বাস্থ্য কমপ্লেক্স' },
-    address: 'Morrelganj Main Road',
-    phone: '01712345678',
-    isVerified: true,
-    isFeatured: true,
-    image: 'https://images.unsplash.com/photo-1586773860418-d319a241f211?auto=format&fit=crop&q=80&w=400',
-    category: 'Hospitals'
-  },
-  {
-    id: '2',
-    title: { en: 'Sunrise Private Clinic', bn: 'সানরাইজ প্রাইভেট ক্লিনিক' },
-    address: 'Hospital Quarter Area',
-    phone: '01711112222',
-    isVerified: true,
-    isFeatured: false,
-    image: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=400',
-    category: 'Hospitals'
-  }
-];
 
 // --- Components ---
 
@@ -291,13 +284,6 @@ function ListingCard({ listing }: { listing: any }) {
   );
 }
 
-import { Star } from 'lucide-react';
-
-import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
-import { CategoryGrid } from './components/CategoryGrid';
-import { CategoryHeader } from './components/CategoryView';
-import { ListingDetail } from './components/ListingDetail';
-import { useParams } from 'react-router-dom';
 
 // --- Routing Components ---
 
@@ -402,11 +388,10 @@ function HomePage() {
               </Link>
             ))
           ) : (
-            MOCK_LISTINGS.map(listing => (
-              <Link key={listing.id} to={`/listing/${listing.id}`}>
-                <ListingCard listing={listing} />
-              </Link>
-            ))
+            <div className="col-span-full py-20 text-center bg-white dark:bg-zinc-900 rounded-[3rem] border border-dashed border-slate-200 dark:border-zinc-800">
+               <Grid className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+               <p className="text-slate-400 font-medium font-sans">No featured listings found.</p>
+            </div>
           )}
         </div>
       </section>
@@ -447,27 +432,98 @@ function HomePage() {
   );
 }
 
-import { 
-  collection, addDoc, getDocs, serverTimestamp 
-} from 'firebase/firestore';
-import { db, signInWithGoogle } from './lib/firebase';
 
 function AdminPanel() {
-  const { user } = useFirebase();
+  const { user, categories, featuredListings, listings: publishedListings } = useFirebase();
   const [isSeeding, setIsSeeding] = useState(false);
+  const [pendingListings, setPendingListings] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'stats' | 'pending' | 'all-listings' | 'categories'>('stats');
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ name_en: '', name_bn: '', icon: 'grid', slug: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const handleAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await addDoc(collection(db, 'categories'), {
+        name: { en: categoryForm.name_en, bn: categoryForm.name_bn },
+        icon: categoryForm.icon,
+        slug: categoryForm.slug || categoryForm.name_en.toLowerCase().replace(/\s+/g, '-'),
+        createdAt: serverTimestamp(),
+      });
+      setShowAddCategory(false);
+      setCategoryForm({ name_en: '', name_bn: '', icon: 'grid', slug: '' });
+      alert("Category added!");
+    } catch (err) {
+      alert("Error adding category.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Fetch pending listings when admin is authenticated
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+
+    const q = query(
+      collection(db, 'listings'),
+      where('status', '==', 'pending'),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+      setPendingListings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => unsub();
+  }, [isAdminAuthenticated]);
+
+  const handleApprove = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'listings', id), {
+        status: 'published',
+        isVerified: true
+      });
+      alert("Listing approved and published!");
+    } catch (err) {
+      alert("Error approving listing.");
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this submission?")) return;
+    try {
+      await deleteDoc(doc(db, 'listings', id));
+      alert("Submission rejected and deleted.");
+    } catch (err) {
+      alert("Error rejecting listing.");
+    }
+  };
+
+  const toggleFeatured = async (id: string, current: boolean) => {
+    try {
+      await updateDoc(doc(db, 'listings', id), {
+        isFeatured: !current
+      });
+    } catch (err) {
+      alert("Error updating featured status.");
+    }
+  };
+
+  const handleLogin = async (e: any) => {
     e.preventDefault();
     setIsVerifying(true);
     try {
       const resp = await fetch('/api/admin/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email, password })
+        body: JSON.stringify({ email, password })
       });
       const data = await resp.json();
       if (data.success) {
@@ -491,160 +547,403 @@ function AdminPanel() {
         <h1 className="text-3xl font-black mb-4">Admin Portal</h1>
         <p className="text-slate-500 mb-8 font-medium">Restricted to Morrelganj administrators. Please authenticate to continue.</p>
         
-        {!user ? (
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="text-left mb-4">
+            <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Admin Email</label>
+            <input 
+              type="email"
+              value={email}
+              required
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none mt-2"
+              placeholder="admin@morrelganj.com"
+            />
+          </div>
+          <div className="text-left mb-6">
+            <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Admin Password</label>
+            <input 
+              type="password"
+              value={password}
+              required
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none mt-2"
+              placeholder="••••••••••••"
+            />
+          </div>
           <button 
-            onClick={signInWithGoogle}
-            className="w-full py-4 bg-emerald-700 hover:bg-emerald-800 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-900/20 transition-all flex items-center justify-center gap-3"
+            type="submit"
+            disabled={isVerifying}
+            className="w-full h-16 bg-emerald-700 hover:bg-emerald-800 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-900/20 transition-all disabled:opacity-50"
           >
-            <User className="w-5 h-5" />
-            Sign In with Google
+            {isVerifying ? 'Verifying...' : 'Unlock Dashboard'}
           </button>
-        ) : (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="text-left mb-6">
-              <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Admin Password</label>
-              <input 
-                type="password"
-                value={password}
-                required
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none mt-2"
-                placeholder="••••••••••••"
-              />
-            </div>
-            <button 
-              type="submit"
-              disabled={isVerifying}
-              className="w-full py-4 bg-emerald-700 hover:bg-emerald-800 text-white font-black uppercase tracking-widest rounded-2xl transition-all disabled:opacity-50"
-            >
-              {isVerifying ? 'Verifying...' : 'Unlock Dashboard'}
-            </button>
-          </form>
-        )}
+        </form>
       </div>
     );
   }
 
+  const handleRejectCategory = async (id: string) => {
+    if (!confirm("Delete this category? This will not delete listings but they will lose their category link.")) return;
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+      alert("Category deleted.");
+    } catch (err) {
+      alert("Error deleting category.");
+    }
+  };
+
   const seedData = async () => {
     setIsSeeding(true);
     try {
-      // 1. Check if categories exist
+      const SYSTEM_CATEGORIES = [
+        { id: '1', name: { en: 'Hospitals', bn: 'হাসপাতাল' }, icon: 'hospital', slug: 'hospitals' },
+        { id: '2', name: { en: 'Education', bn: 'শিক্ষা' }, icon: 'graduation-cap', slug: 'education' },
+        { id: '3', name: { en: 'Transport', bn: 'পরিবহন' }, icon: 'bus', slug: 'transport' },
+        { id: '4', name: { en: 'Emergency', bn: 'জরুরি' }, icon: 'shield-alert', slug: 'emergency' },
+        { id: '5', name: { en: 'Dining', bn: 'খাবার' }, icon: 'utensils', slug: 'dining' },
+        { id: '6', name: { en: 'Shopping', bn: 'কেনাকাটা' }, icon: 'store', slug: 'shopping' },
+        { id: '7', name: { en: 'Public Support', bn: 'জনসেবা' }, icon: 'users', slug: 'public-support' },
+        { id: '8', name: { en: 'Banks & ATM', bn: 'ব্যাংক ও এটিএম' }, icon: 'bank', slug: 'banks' },
+        { id: '9', name: { en: 'Daily Needs', bn: 'নিত্যপ্রয়োজনীয়' }, icon: 'shopping-bag', slug: 'daily-needs' },
+        { id: '10', name: { en: 'Technical Support', bn: 'টেকনিক্যাল সাপোর্ট' }, icon: 'wrench', slug: 'tech-support' },
+      ];
+
       const catSnap = await getDocs(collection(db, 'categories'));
-      if (catSnap.empty) {
-        console.log("Seeding categories...");
-        for (const cat of MOCK_CATEGORIES) {
-          const docRef = await addDoc(collection(db, 'categories'), {
+      
+      // If user wants to seed, we let them even if not empty, by skipping already existing slugs
+      const existingSlugs = catSnap.docs.map(d => d.data().slug);
+      
+      let count = 0;
+      for (const cat of SYSTEM_CATEGORIES) {
+        if (!existingSlugs.includes(cat.slug)) {
+          await addDoc(collection(db, 'categories'), {
             name: cat.name,
             icon: cat.icon,
             slug: cat.slug,
-            order: parseInt(cat.id)
+            order: parseInt(cat.id),
+            createdAt: serverTimestamp()
           });
-          
-          // Seed some listings for this category
-          const relevantMockListings = MOCK_LISTINGS.filter(l => l.category === cat.name.en);
-          for (const listing of relevantMockListings) {
-             await addDoc(collection(db, 'listings'), {
-                categoryId: docRef.id,
-                title: listing.title,
-                address: listing.address,
-                phone: listing.phone,
-                isVerified: listing.isVerified,
-                isFeatured: listing.isFeatured,
-                imageUrls: [listing.image],
-                status: 'published',
-                createdAt: serverTimestamp()
-             });
-          }
+          count++;
         }
-        alert("Success! Initial data seeded to Firestore.");
+      }
+      
+      if (count > 0) {
+        alert(`${count} system categories seeded.`);
       } else {
-        alert("Data already exists in Firestore.");
+        alert("All system categories already exist.");
       }
     } catch (err) {
       console.error(err);
-      alert("Error seeding data. Check console.");
+      alert("Error seeding: " + (err as Error).message);
     } finally {
       setIsSeeding(false);
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full">
+    <div className="max-w-7xl mx-auto px-6 py-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
+        <div className="flex items-center gap-6">
+          <Link to="/" className="p-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-sm hover:bg-emerald-600 hover:text-white transition-all">
             <ArrowLeft className="w-6 h-6" />
           </Link>
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+          <div>
+            <h1 className="text-4xl font-black tracking-tight">Morrelganj CMS</h1>
+            <p className="text-slate-500 font-medium tracking-wide uppercase text-xs mt-1">Management Dashboard</p>
+          </div>
         </div>
-        <button 
-          onClick={seedData}
-          disabled={isSeeding}
-          className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl text-sm font-bold transition-all disabled:opacity-50"
-        >
-          {isSeeding ? 'Seeding...' : 'Seed Initial Data'}
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={seedData}
+            disabled={isSeeding}
+            className="px-6 py-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-xl text-xs font-black uppercase tracking-widest transition-all disabled:opacity-50"
+          >
+            {isSeeding ? 'Seeding...' : 'Seed System Categories'}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+      {/* Tabs */}
+      <div className="flex gap-2 mb-10 overflow-x-auto pb-2 scrollbar-hide">
         {[
-          { label: 'Total Listings', value: '1,240', icon: Grid, color: 'text-blue-500' },
-          { label: 'Pending Approval', value: '12', icon: ShieldCheck, color: 'text-amber-500' },
-          { label: 'Total Views', value: '45.2K', icon: LayoutDashboard, color: 'text-emerald-500' },
-          { label: 'Featured Ads', value: '8', icon: Heart, color: 'text-rose-500' },
-        ].map(stat => (
-          <div key={stat.label} className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <stat.icon className={cn("w-6 h-6", stat.color)} />
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Growth</span>
-            </div>
-            <div className="text-2xl font-bold mb-1">{stat.value}</div>
-            <div className="text-sm text-zinc-500">{stat.label}</div>
-          </div>
+          { id: 'stats', label: 'Overview', icon: LayoutDashboard },
+          { id: 'pending', label: `Pending (${pendingListings.length})`, icon: Clock },
+          { id: 'all-listings', label: 'Manage Data', icon: List },
+          { id: 'categories', label: 'Categories', icon: Grid }
+        ].map(tab => (
+          <button 
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={cn(
+              "flex items-center gap-3 px-8 py-4 rounded-2xl text-sm font-black uppercase tracking-[0.15em] transition-all whitespace-nowrap",
+              activeTab === tab.id 
+                ? "bg-emerald-700 text-white shadow-xl shadow-emerald-900/20" 
+                : "bg-white dark:bg-zinc-900 text-slate-400 hover:text-emerald-700 border border-slate-100 dark:border-zinc-800"
+            )}
+          >
+            <tab.icon className="w-5 h-5" />
+            {tab.label}
+          </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800">
-          <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-            <PlusCircle className="w-5 h-5 text-emerald-600" />
-            Add New Record
-          </h3>
-          <div className="space-y-4">
-            <button className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl transition-colors">
-              New Business Listing
-            </button>
-            <button className="w-full py-4 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 font-bold rounded-2xl transition-colors">
-              New Category / Subcategory
-            </button>
+      {activeTab === 'all-listings' && (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row gap-4 mb-8">
+            <div className="flex-1 relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search listings to manage..." 
+                className="w-full h-16 bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-2xl pl-12 pr-6 font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none"
+              />
+            </div>
+            <Link to="/submit" className="h-16 px-8 bg-emerald-700 text-white flex items-center justify-center gap-2 rounded-2xl font-black uppercase tracking-widest active:scale-95 transition-all">
+              <PlusCircle className="w-5 h-5" /> Add New
+            </Link>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-slate-100 dark:border-zinc-800 overflow-hidden shadow-sm">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-zinc-800/50">
+                  <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Listing Info</th>
+                  <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Category</th>
+                  <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Status</th>
+                  <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-zinc-800">
+                {publishedListings.map(listing => (
+                  <tr key={listing.id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                          <img src={listing.imageUrls?.[0] || 'https://images.unsplash.com/photo-1516542076529-1ea3854896f2?auto=format&fit=crop&q=80&w=400'} className="w-full h-full object-cover" />
+                        </div>
+                        <div>
+                          <div className="font-black text-slate-900 dark:text-white leading-tight">{listing.title?.en}</div>
+                          <div className="text-[10px] font-bold text-slate-400 uppercase mt-1 tracking-widest">{listing.union}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className="text-xs font-bold text-slate-500">{categories.find(c => c.id === listing.categoryId)?.name.en || 'General'}</span>
+                    </td>
+                    <td className="px-8 py-6">
+                       <div className="flex gap-2">
+                         {listing.isVerified && <ShieldCheck className="w-4 h-4 text-blue-500" />}
+                         {listing.isFeatured && <Star className="w-4 h-4 text-amber-500 fill-current" />}
+                       </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="flex gap-3">
+                         <button onClick={() => toggleFeatured(listing.id, listing.isFeatured)} className={cn("p-2 rounded-lg transition-colors", listing.isFeatured ? "bg-amber-100 text-amber-600" : "bg-slate-100 dark:bg-zinc-800 text-slate-400")}>
+                           <Heart className={cn("w-4 h-4", listing.isFeatured && "fill-current")} />
+                         </button>
+                         <button className="p-2 bg-slate-100 dark:bg-zinc-800 text-slate-400 hover:text-emerald-700 rounded-lg transition-colors"><Edit className="w-4 h-4" /></button>
+                         <button onClick={() => handleReject(listing.id)} className="p-2 bg-slate-100 dark:bg-zinc-800 text-slate-400 hover:text-red-600 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      )}
 
-        <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800">
-          <h3 className="text-xl font-bold mb-6">Recent Activity</h3>
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex items-center justify-between py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-zinc-100 dark:bg-zinc-800 rounded-full" />
-                  <div>
-                    <div className="font-bold text-sm">New Listing: Al-Madina Hotel</div>
-                    <div className="text-xs text-zinc-500">2 minutes ago</div>
+      {activeTab === 'stats' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
+            {[
+              { label: 'Live Listings', value: publishedListings.length, icon: Grid, color: 'text-blue-500' },
+              { label: 'Verification Queue', value: pendingListings.length, icon: ShieldAlert, color: 'text-amber-500' },
+              { label: 'Total Categories', value: categories.length, icon: ShieldCheck, color: 'text-emerald-500' },
+              { label: 'Featured Items', value: featuredListings.length, icon: Heart, color: 'text-rose-500' },
+            ].map(stat => (
+              <div key={stat.label} className="bg-white dark:bg-zinc-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-zinc-800 shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                  <div className={cn("p-4 rounded-2xl bg-slate-50 dark:bg-zinc-800", stat.color)}>
+                    <stat.icon className="w-6 h-6" />
                   </div>
+                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Real-time</span>
                 </div>
-                <button className="text-emerald-600 text-xs font-bold uppercase tracking-widest">Review</button>
+                <div className="text-4xl font-black mb-1">{stat.value}</div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">{stat.label}</div>
               </div>
             ))}
           </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-slate-100 dark:border-zinc-800 shadow-sm">
+              <h3 className="text-2xl font-black mb-8">System Overview</h3>
+              <div className="aspect-[21/9] bg-slate-50 dark:bg-zinc-800/50 rounded-3xl flex items-center justify-center text-slate-300 font-bold uppercase tracking-widest text-sm">
+                Operational Status: Healthy
+              </div>
+            </div>
+            <div className="bg-emerald-950 p-10 rounded-[3rem] text-white flex flex-col justify-between shadow-2xl">
+              <div>
+                <h3 className="text-2xl font-black mb-4">Quick Actions</h3>
+                <p className="text-emerald-400 text-sm font-medium leading-relaxed">Regularly monitor the queue to maintain platform quality.</p>
+              </div>
+              <div className="space-y-3 mt-10">
+                <button onClick={() => setActiveTab('pending')} className="w-full py-4 bg-white text-emerald-950 font-black uppercase tracking-widest rounded-2xl hover:scale-[1.02] transition-all">Review Submissions</button>
+                <button className="w-full py-4 bg-emerald-800/50 text-emerald-400 font-black uppercase tracking-widest rounded-2xl border border-emerald-700/50">Export Data</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === 'pending' && (
+        <div className="space-y-6">
+          {pendingListings.length > 0 ? pendingListings.map(listing => (
+            <div key={listing.id} className="bg-white dark:bg-zinc-900 rounded-[2.5rem] border border-slate-100 dark:border-zinc-800 p-8 shadow-sm group hover:shadow-xl transition-all">
+              <div className="flex flex-col md:flex-row gap-8 items-start">
+                <div className="w-full md:w-48 aspect-square rounded-3xl bg-slate-100 dark:bg-zinc-800 overflow-hidden shrink-0">
+                  <img src={listing.imageUrls?.[0] || 'https://images.unsplash.com/photo-1516542076529-1ea3854896f2?auto=format&fit=crop&q=80&w=400'} className="w-full h-full object-cover" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="px-3 py-1 bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest rounded-lg">New Submission</span>
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{listing.union}</span>
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-2">{listing.title?.en}</h3>
+                  <p className="text-slate-500 font-medium mb-6 line-clamp-2">{listing.description_en || listing.address}</p>
+                  
+                  <div className="flex flex-wrap gap-3">
+                    <button onClick={() => handleApprove(listing.id)} className="px-6 py-3 bg-emerald-700 text-white font-black uppercase tracking-widest rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-900/20 active:scale-95 transition-all">
+                      <CheckCircle2 className="w-4 h-4" /> Approve & Verify
+                    </button>
+                    <button onClick={() => handleReject(listing.id)} className="px-6 py-3 bg-white dark:bg-zinc-800 text-red-600 border border-red-100 dark:border-red-900/30 font-black uppercase tracking-widest rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all">
+                      <Trash2 className="w-4 h-4" /> Reject
+                    </button>
+                    <button className="px-6 py-3 bg-slate-50 dark:bg-zinc-800 text-slate-600 font-black uppercase tracking-widest rounded-xl text-xs flex items-center gap-2 active:scale-95 transition-all">
+                      <Edit className="w-4 h-4" /> Edit Details
+                    </button>
+                  </div>
+                </div>
+                <div className="w-full md:w-64 p-6 bg-slate-50 dark:bg-zinc-800 rounded-3xl">
+                   <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Contact Info</div>
+                   <div className="flex items-center gap-3 mb-3">
+                      <Phone className="w-4 h-4 text-emerald-600" />
+                      <span className="text-sm font-bold">{listing.phone}</span>
+                   </div>
+                   {listing.whatsapp && (
+                     <div className="flex items-center gap-3">
+                        <MessageSquare className="w-4 h-4 text-emerald-500" />
+                        <span className="text-sm font-bold">{listing.whatsapp}</span>
+                     </div>
+                   )}
+                </div>
+              </div>
+            </div>
+          )) : (
+            <div className="text-center py-32 bg-white dark:bg-zinc-900 rounded-[3rem] border-2 border-dashed border-slate-100 dark:border-zinc-800">
+               <ShieldCheck className="w-16 h-16 text-slate-200 mx-auto mb-6" />
+               <h3 className="text-xl font-black uppercase tracking-[0.2em] text-slate-300">Verification Queue Clear</h3>
+               <p className="text-slate-400 font-medium mt-2">No pending listings to review at the moment.</p>
+            </div>
+          )}
         </div>
-      </div>
+      )}
+
+      {activeTab === 'categories' && (
+        <div className="space-y-8">
+          {showAddCategory && (
+            <div className="bg-white dark:bg-zinc-900 p-8 rounded-[2.5rem] border border-slate-100 dark:border-zinc-800 shadow-xl animate-in slide-in-from-top duration-300">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-black">Add New Category</h3>
+                <button onClick={() => setShowAddCategory(false)} className="p-2 bg-slate-100 dark:bg-zinc-800 rounded-full hover:bg-red-50 transition-colors">
+                  <X className="w-5 h-5 text-slate-400 hover:text-red-600" />
+                </button>
+              </div>
+              <form onSubmit={handleAddCategory} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                 <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Name (English)</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={categoryForm.name_en}
+                      onChange={(e) => setCategoryForm({...categoryForm, name_en: e.target.value})}
+                      className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold focus:ring-4 focus:ring-emerald-500/10 outline-none"
+                    />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Name (Bengali)</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={categoryForm.name_bn}
+                      onChange={(e) => setCategoryForm({...categoryForm, name_bn: e.target.value})}
+                      className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold"
+                    />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">Icon Identifier</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="e.g. hospital, store, bus"
+                      value={categoryForm.icon}
+                      onChange={(e) => setCategoryForm({...categoryForm, icon: e.target.value})}
+                      className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold"
+                    />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 px-2">URL Slug (Optional)</label>
+                    <input 
+                      type="text" 
+                      value={categoryForm.slug}
+                      onChange={(e) => setCategoryForm({...categoryForm, slug: e.target.value})}
+                      className="w-full h-14 bg-slate-50 border border-slate-100 rounded-2xl px-6 font-bold"
+                    />
+                 </div>
+                 <div className="md:col-span-2">
+                    <button 
+                      type="submit" 
+                      disabled={isSubmitting}
+                      className="w-full h-16 bg-emerald-700 text-white font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-900/20 disabled:opacity-50 transition-all"
+                    >
+                      {isSubmitting ? "Saving..." : "Create Category"}
+                    </button>
+                 </div>
+              </form>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <button 
+              onClick={() => setShowAddCategory(true)}
+              className="aspect-[3/2] flex flex-col items-center justify-center gap-4 bg-slate-50 dark:bg-zinc-900 border-2 border-dashed border-slate-200 dark:border-zinc-800 rounded-[2.5rem] hover:border-emerald-500 hover:bg-emerald-50/50 transition-all group"
+            >
+              <PlusCircle className="w-10 h-10 text-slate-300 group-hover:text-emerald-600 transition-colors" />
+              <span className="text-sm font-black uppercase tracking-widest text-slate-400 group-hover:text-emerald-700">Add New Category</span>
+            </button>
+            {categories.map(cat => {
+              const Icon = iconMap[cat.icon] || Grid;
+              return (
+                <div key={cat.id} className="aspect-[3/2] group bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-[2.5rem] p-8 relative overflow-hidden shadow-sm hover:shadow-xl transition-all">
+                  <div className="absolute top-0 right-0 p-4 flex gap-2">
+                    <button className="p-2 text-slate-300 hover:text-emerald-600"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => handleRejectCategory(cat.id)} className="p-2 text-slate-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                  <div className="w-16 h-16 bg-slate-50 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-emerald-700 mb-6 group-hover:scale-110 transition-transform">
+                    <Icon className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-xl font-black text-slate-900 dark:text-white mb-1 uppercase tracking-tight">{cat.name.en}</h4>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest italic">{cat.name.bn}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-import { ListingSubmission } from './components/ListingSubmission';
-
-// --- Root App ---
 
 export default function App() {
   const [lang, setLang] = useState<Language>('bn');
