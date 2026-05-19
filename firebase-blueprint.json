@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "A top-level category for listings (e.g., Hospitals, Education).",
+      "type": "object",
+      "properties": {
+        "name_en": { "type": "string" },
+        "name_bn": { "type": "string" },
+        "icon": { "type": "string" },
+        "slug": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["name_en", "name_bn", "icon", "slug"]
+    },
+    "Subcategory": {
+      "title": "Subcategory",
+      "description": "A sub-category belonging to a main category.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "name_en": { "type": "string" },
+        "name_bn": { "type": "string" },
+        "slug": { "type": "string" }
+      },
+      "required": ["categoryId", "name_en", "name_bn", "slug"]
+    },
+    "Listing": {
+      "title": "Listing",
+      "description": "A business or service listing.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "subcategoryId": { "type": "string" },
+        "title_en": { "type": "string" },
+        "title_bn": { "type": "string" },
+        "description_en": { "type": "string" },
+        "description_bn": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "address": { "type": "string" },
+        "mapUrl": { "type": "string" },
+        "imageUrls": { "type": "array" },
+        "businessHours": { "type": "string" },
+        "tags": { "type": "array" },
+        "isFeatured": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["published", "pending", "hidden"] },
+        "reviews": { "type": "array" }
+      },
+      "required": ["categoryId", "title_en", "title_bn", "status"]
+    },
+    "AppSetting": {
+      "title": "App Setting",
+      "description": "Global settings for the app.",
+      "type": "object",
+      "properties": {
+        "emergencyContacts": { "type": "array" },
+        "announcements": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Main categories"
+    },
+    "/subcategories/{subcategoryId}": {
+      "schema": "Subcategory",
+      "description": "Subcategories for main categories"
+    },
+    "/listings/{listingId}": {
+      "schema": "Listing",
+      "description": "The listings themselves"
+    },
+    "/settings/{settingId}": {
+      "schema": "AppSetting",
+      "description": "Global app configurations"
+    }
+  }
+}

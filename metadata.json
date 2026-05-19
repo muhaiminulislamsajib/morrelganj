@@ -1,0 +1,8 @@
+{
+  "name": "Morrelganj",
+  "description": "The complete digital operating system for Morrelganj. Access daily life information, services, businesses, and emergency contacts in one place.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
